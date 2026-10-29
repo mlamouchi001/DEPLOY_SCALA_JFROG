@@ -1,0 +1,218 @@
+---
+# Etapes communes a deploy.yml et deploy_vault.yml. Chaque playbook fixe :
+#   playbook_bundle_default      : traiter le bundle zip (scripts shell, fichiers de configuration)
+#   playbook_hdfs_default        : copier le jar et les scripts sur HDFS
+#   playbook_vault_legacy_layout : emplacement historique du fichier Vault (deploy_vault.yml)
+
+# ---------------------------------------------------------------------------------------------------------
+# 1. Parametres et controles : on s'arrete avant de toucher au serveur si une extra var manque.
+# ---------------------------------------------------------------------------------------------------------
+- name: "Parametres du deploiement"
+  set_fact:
+    _deploy_bundle: "{{ (deploy_bundle | default(playbook_bundle_default)) | bool }}"
+    _deploy_hdfs: "{{ playbook_hdfs_default | bool }}"
+    _deploy_conf: "{{ (deploy_config_file | default('false')) | bool }}"
+    _application_conf: "{{ application_conf | default('all', true) }}"
+    _jar_name: "{{ jar_name | default(file_name_jfrog, true) }}"
+    _app_dir: "{{ path_principal_deploy }}/{{ irt_trigram }}/{{ env }}/{{ path_source | default('scala', true) }}"
+    _bin_dir: "{{ path_principal_deploy }}/{{ path_script_deploy }}"
+    _sh_dir: "{{ path_principal_deploy }}/{{ path_shell_deploy }}"
+    _conf_dir: "{{ path_principal_deploy }}/{{ path_conf_deploy }}"
+    _tmp_root: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp"
+    _hdfs_base: "/{{ env }}/{{ app_config }}/{{ irt_trigram }}"
+    _artifact_url: "{{ dsp_url_jfrog }}/{{ repo_jfrog }}/{{ path_group_id }}/{{ project_name }}/{{ app_version }}"
+
+- name: "Controle des extra vars"
+  assert:
+    that:
+      - env in ['dev', 'int', 'fhml', 'prd']
+      - irt_trigram is defined and irt_trigram is match('^[A-Za-z0-9_-]+$')
+      - app_config is defined and app_config | length > 0 and '..' not in app_config
+      - project_name is defined and project_name is match('^[A-Za-z0-9._-]+$')
+      - project_version is defined and project_version | length > 0
+      - app_version is defined and app_version | length > 0
+      - path_group_id is defined and path_group_id | length > 0 and '..' not in path_group_id
+      - repo_jfrog_prj is defined and repo_jfrog_prj | length > 0
+      - jf_access_token is defined and jf_access_token | length > 0
+      - _jar_name is match('^[A-Za-z0-9._-]+$')
+      - (path_source | default('scala', true)) is match('^[A-Za-z0-9._-]+$')
+      - _application_conf == 'all' or _application_conf is match('^[A-Za-z0-9._*?-]+$')
+    fail_msg: >-
+      Extra vars manquantes ou invalides (env, irt_trigram, app_config, project_name, project_version,
+      app_version, path_group_id, repo_jfrog_prj, jf_access_token, jar_name, path_source, application_conf).
+      Verifiez les parametres envoyes par le workflow GitHub Actions.
+    quiet: true
+
+# ---------------------------------------------------------------------------------------------------------
+# 2. Dossiers de l'application et dossier de travail propre a ce deploiement
+# ---------------------------------------------------------------------------------------------------------
+- name: "Dossiers de l'application"
+  file:
+    path: "{{ item }}"
+    state: directory
+  loop: "{{ [_bin_dir, _tmp_root] + ([_sh_dir, _conf_dir] if _deploy_bundle else []) }}"
+
+- name: "Dossier de travail du deploiement"
+  tempfile:
+    state: directory
+    path: "{{ _tmp_root }}"
+    prefix: "deploy_"
+  register: _work
+
+- name: "Deploiement"
+  block:
+    # -----------------------------------------------------------------------------------------------------
+    # 3. Telechargement depuis JFrog (presence controlee, empreinte SHA-256 verifiee, nouvelles tentatives)
+    # -----------------------------------------------------------------------------------------------------
+    - name: "Telechargement du jar"
+      include_tasks: download.yml
+      vars:
+        _dl_label: "jar {{ file_name_jfrog }}.jar"
+        _dl_url: "{{ _artifact_url }}/{{ file_name_jfrog }}.jar"
+        _dl_dest: "{{ _work.path }}/{{ _jar_name }}.jar"
+
+    - name: "Telechargement du bundle zip"
+      include_tasks: download.yml
+      vars:
+        _dl_label: "bundle {{ zip_name_jfrog }}"
+        _dl_url: "{{ _artifact_url }}/{{ zip_name_jfrog }}"
+        _dl_dest: "{{ _work.path }}/{{ file_name_jfrog }}.zip"
+      when: _deploy_bundle
+
+    - name: "Extraction du bundle zip"
+      unarchive:
+        src: "{{ _work.path }}/{{ file_name_jfrog }}.zip"
+        dest: "{{ _work.path }}/"
+        remote_src: true
+      when: _deploy_bundle
+
+    # -----------------------------------------------------------------------------------------------------
+    # 4. Jar
+    # -----------------------------------------------------------------------------------------------------
+    - name: "Installation du jar dans {{ _bin_dir }}"
+      copy:
+        src: "{{ _work.path }}/{{ _jar_name }}.jar"
+        dest: "{{ _bin_dir }}/"
+        remote_src: true
+        mode: '0755'
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+
+    - name: "Copie du jar sur HDFS : {{ _hdfs_base }}/bin"
+      hdfs_copy:
+        src: "{{ _work.path }}/{{ _jar_name }}.jar"
+        dest: "{{ _hdfs_base }}/bin"
+        mode: "{{ mode | default(omit) }}"
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+        kerberos_keytab: "{{ keytab_path }}"
+        kerberos_principal: "{{ keytab_principal }}"
+      when: _deploy_hdfs
+      run_once: true
+
+    # -----------------------------------------------------------------------------------------------------
+    # 5. Scripts shell du bundle
+    # -----------------------------------------------------------------------------------------------------
+    - name: "Recherche des scripts shell du bundle"
+      find:
+        paths: "{{ _work.path }}"
+        file_type: file
+        recurse: true
+        patterns: "*.sh"
+      register: _scripts
+      when: _deploy_bundle
+
+    - name: "Installation des scripts dans {{ _sh_dir }}"
+      copy:
+        src: "{{ item.path }}"
+        dest: "{{ _sh_dir }}/"
+        remote_src: true
+        mode: '0755'
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+      loop: "{{ _scripts.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _deploy_bundle
+
+    - name: "Copie des scripts sur HDFS : {{ _hdfs_base }}/sh"
+      hdfs_copy:
+        src: "{{ item.path }}"
+        dest: "{{ _hdfs_base }}/sh"
+        mode: "{{ mode | default(omit) }}"
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+        kerberos_keytab: "{{ keytab_path }}"
+        kerberos_principal: "{{ keytab_principal }}"
+      loop: "{{ _scripts.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _deploy_bundle and _deploy_hdfs
+      run_once: true
+
+    # -----------------------------------------------------------------------------------------------------
+    # 6. Fichiers de configuration du bundle (deploy_config_file) : tous (application_conf = all) ou un seul
+    # -----------------------------------------------------------------------------------------------------
+    - name: "Recherche des fichiers de configuration ({{ _application_conf }})"
+      find:
+        paths: "{{ _work.path }}"
+        file_type: file
+        recurse: true
+        patterns: "{{ '*.conf' if _application_conf == 'all' else _application_conf }}"
+      register: _confs
+      when: _deploy_bundle and _deploy_conf
+
+    - name: "Controle des fichiers de configuration trouves"
+      assert:
+        that: _confs.files | length > 0
+        fail_msg: "Aucun fichier de configuration '{{ _application_conf }}' dans le bundle {{ zip_name_jfrog }}"
+        quiet: true
+      when: _deploy_bundle and _deploy_conf
+
+    - name: "Installation de la configuration dans {{ _conf_dir }}"
+      copy:
+        src: "{{ item.path }}"
+        dest: "{{ _conf_dir }}/"
+        remote_src: true
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+      loop: "{{ _confs.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _deploy_bundle and _deploy_conf
+
+    - name: "Copie de la configuration sur HDFS : {{ _hdfs_base }}/conf"
+      hdfs_copy:
+        src: "{{ item.path }}"
+        dest: "{{ _hdfs_base }}/conf"
+        mode: "{{ mode | default(omit) }}"
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+        kerberos_keytab: "{{ keytab_path }}"
+        kerberos_principal: "{{ keytab_principal }}"
+      loop: "{{ _confs.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      when: _deploy_bundle and _deploy_conf
+      run_once: true
+
+    # -----------------------------------------------------------------------------------------------------
+    # 7. Fichier Vault
+    # -----------------------------------------------------------------------------------------------------
+    - name: "Configuration Vault"
+      include_tasks: vault.yml
+
+    - name: "Resume"
+      debug:
+        msg:
+          - "Jar        : {{ _bin_dir }}/{{ _jar_name }}.jar ({{ file_name_jfrog }} depuis {{ repo_jfrog }})"
+          - "Scripts    : {{ (_scripts.files | default([]) | map(attribute='path') | map('basename') | list) if _deploy_bundle else 'non traites' }}"
+          - "Conf       : {{ (_confs.files | default([]) | map(attribute='path') | map('basename') | list) if (_deploy_bundle and _deploy_conf) else 'non deployee' }}"
+          - "HDFS       : {{ _hdfs_base if _deploy_hdfs else 'non' }}"
+          - "vault.conf : {{ _vault_dest | default('non depose') }}"
+
+  always:
+    - name: "Suppression du dossier de travail"
+      file:
+        path: "{{ _work.path }}"
+        state: absent

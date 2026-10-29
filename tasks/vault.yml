@@ -1,0 +1,90 @@
+---
+# Fichier de configuration Vault (AppRole) de l'application. Deux sources, par extra vars :
+#   - vault_conf_b64 : fichier complet, encode en base64 (workflow GitHub Actions avec vault_enabled) ;
+#   - approle_id / approle_secret : valeurs placees dans le modele files/<file_conf> (#{approle_id}, #{approle_secret}).
+# Emplacement :
+#   - deploy_vault.yml (playbook_vault_legacy_layout) : <path_principal_deploy>/<irt_trigram>/<path_conf>/<nom>, comme avant ;
+#   - deploy.yml : <dossier de l'application>/<vault_conf_path, defaut conf>/<nom>, a cote de la configuration.
+# Le fichier est ecrit en 600 ; son contenu n'apparait jamais dans les journaux AWX.
+
+- name: "Vault : source du fichier"
+  set_fact:
+    _vault_b64: "{{ vault_conf_b64 | default('', true) }}"
+    _vault_role: "{{ approle_id | default('', true) }}"
+    _vault_secret: "{{ approle_secret | default('', true) }}"
+    _vault_name: "{{ vault_conf_name | default(file_conf | default('vault.conf', true), true) }}"
+  no_log: true
+
+- name: "Vault : mode"
+  set_fact:
+    _vault_mode: >-
+      {{ 'b64' if _vault_b64 | length > 0
+         else ('approle' if (_vault_role | length > 0 and (playbook_vault_legacy_layout | bool or _vault_secret | length > 0))
+         else 'none') }}
+
+- name: "Vault : emplacement"
+  set_fact:
+    _vault_dest_dir: >-
+      {{ (path_principal_deploy ~ '/' ~ irt_trigram ~ '/' ~ (path_conf | default('', true)) ~ '/')
+         if playbook_vault_legacy_layout | bool
+         else (_app_dir ~ '/' ~ (vault_conf_path | default('conf', true) | regex_replace('^/+|/+$', ''))) }}
+  when: _vault_mode != 'none'
+
+- name: "Vault : controle du nom et de l'emplacement"
+  assert:
+    that:
+      - _vault_name is match('^[A-Za-z0-9._-]+$')
+      - "'..' not in _vault_dest_dir"
+    fail_msg: "Nom ({{ _vault_name }}) ou dossier ({{ _vault_dest_dir }}) du fichier Vault invalide"
+    quiet: true
+  when: _vault_mode != 'none'
+
+- name: "Vault : contenu"
+  set_fact:
+    _vault_content: >-
+      {{ (_vault_b64 | b64decode) if _vault_mode == 'b64'
+         else (lookup('file', playbook_dir ~ '/files/' ~ _vault_name)
+               | replace('#{approle_id}', _vault_role) | replace('#{approle_secret}', _vault_secret)) }}
+  when: _vault_mode != 'none'
+  no_log: true
+
+- name: "Vault : verification du contenu"
+  set_fact:
+    _vault_valid: >-
+      {{ 'roleId' in _vault_content and 'secretId' in _vault_content
+         and '#{approle' not in _vault_content and 'A_RENSEIGNER' not in _vault_content }}
+  when: _vault_mode != 'none'
+  no_log: true
+
+- name: "Vault : controle"
+  assert:
+    that: _vault_valid | bool
+    fail_msg: >-
+      Fichier Vault incomplet : roleId / secretId absents ou non renseignes (#{approle_...} ou A_RENSEIGNER).
+      Verifiez les secrets AppRole du depot GitHub.
+    quiet: true
+  when: _vault_mode != 'none'
+
+- name: "Vault : dossier {{ _vault_dest_dir | default('') }}"
+  file:
+    path: "{{ _vault_dest_dir }}"
+    state: directory
+    owner: "{{ owner | default(omit) }}"
+    group: "{{ group | default(omit) }}"
+  when: _vault_mode != 'none'
+
+- name: "Vault : depot du fichier (600)"
+  copy:
+    content: "{{ _vault_content }}\n"
+    dest: "{{ _vault_dest_dir }}/{{ _vault_name }}"
+    mode: '0600'
+    owner: "{{ owner | default(omit) }}"
+    group: "{{ group | default(omit) }}"
+  when: _vault_mode != 'none'
+  no_log: true
+
+- name: "Vault : emplacement du fichier depose"
+  set_fact:
+    _vault_dest: "{{ (_vault_dest_dir ~ '/' ~ _vault_name) | regex_replace('/+', '/') }}"
+    _vault_content: ""
+  when: _vault_mode != 'none'

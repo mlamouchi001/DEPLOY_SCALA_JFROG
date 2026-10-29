@@ -1,0 +1,56 @@
+---
+# Telechargement d'un artefact JFrog : _dl_label, _dl_url, _dl_dest.
+# Le jeton JFrog est dans les en-tetes : no_log sur les appels, puis message d'erreur sans secret.
+
+- name: "{{ _dl_label }} : presence dans JFrog"
+  uri:
+    url: "{{ _dl_url }}"
+    method: HEAD
+    headers:
+      Authorization: "Bearer {{ jfrog_api_token }}"
+    status_code: [200, 401, 403, 404]
+    timeout: 60
+  register: _dl_head
+  until: _dl_head.status | default(-1) in [200, 401, 403, 404]
+  retries: "{{ download_retries }}"
+  delay: "{{ download_delay }}"
+  ignore_errors: true
+  no_log: true
+
+- name: "{{ _dl_label }} : controle"
+  fail:
+    msg: >-
+      {{ _dl_label }} introuvable ou inaccessible dans JFrog
+      (HTTP {{ _dl_head.status | default('?') }}{{ ', ' ~ _dl_head.msg if _dl_head.msg is defined else '' }}) :
+      {{ _dl_url }}.
+      404 : version ou depot (repo_jfrog_prj) errone ; 401/403 : jeton JFrog invalide ou sans droit de lecture.
+  when: _dl_head.status | default(-1) != 200
+
+- name: "{{ _dl_label }} : telechargement"
+  get_url:
+    url: "{{ _dl_url }}"
+    dest: "{{ _dl_dest }}"
+    force: true
+    headers:
+      Authorization: "Bearer {{ jfrog_api_token }}"
+    # Empreinte publiee par JFrog (en-tete X-Checksum-Sha256) : un fichier tronque ou altere est refuse
+    checksum: "{{ ('sha256:' ~ _dl_head.x_checksum_sha256) if (_dl_head.x_checksum_sha256 | default('')) | length == 64 else omit }}"
+    timeout: "{{ download_timeout }}"
+    mode: '0644'
+  register: _dl_get
+  until: _dl_get is not failed
+  retries: "{{ download_retries }}"
+  delay: "{{ download_delay }}"
+  ignore_errors: true
+  no_log: true
+
+- name: "{{ _dl_label }} : controle du telechargement"
+  fail:
+    msg: >-
+      Echec du telechargement de {{ _dl_label }} apres {{ download_retries }} tentatives
+      (HTTP {{ _dl_get.status_code | default('?') }} : {{ _dl_get.msg | default('erreur inconnue') }}) : {{ _dl_url }}
+  when: _dl_get is failed
+
+- name: "{{ _dl_label }} : telecharge"
+  debug:
+    msg: "{{ _dl_url | basename }} -> {{ _dl_dest }} (sha256 {{ _dl_get.checksum_src | default('non verifie') if _dl_head.x_checksum_sha256 is not defined else _dl_head.x_checksum_sha256 }})"

@@ -1,40 +1,34 @@
 ---
-#path deployment in dev
+# Racine des applications sur les edges
 path_principal_deploy: "/DATA/applications_01"
 
-#folder path
+# Dossier de travail (telechargements, sous tmp/, vide a chaque deploiement)
 path_deploy: "{{ irt_trigram }}/{{ env }}/scala"
 
-#Deploy path
-path_script_deploy: "{{ irt_trigram }}/{{ env }}/{{ path_source }}/bin"
+# Dossiers de l'application : jar, scripts, configuration
+path_script_deploy: "{{ irt_trigram }}/{{ env }}/{{ path_source | default('scala', true) }}/bin"
+path_shell_deploy: "{{ irt_trigram }}/{{ env }}/{{ path_source | default('scala', true) }}/sh"
+path_conf_deploy: "{{ irt_trigram }}/{{ env }}/{{ path_source | default('scala', true) }}/conf"
 
-#sh folder path
-path_shell_deploy: "{{ irt_trigram }}/{{ env }}/{{ path_source }}/sh"
-
-#conf folder path
-path_conf_deploy: "{{ irt_trigram }}/{{ env }}/{{ path_source }}/conf"
-
-#extention ZIP
 artifact_extension: jar
 
-# Maven coordinates of the application to deploy
+# Coordonnees Maven de l'application (extra vars envoyees par GitHub Actions)
 group_id: "{{ project_group_id }}"
-artifact_id: "{{ project_name }}" #"DLUsageView"
-artifact_version: "{{ project_version }}" #"1.0-SNAPSHOT"
-#URl nexus
-dsp_url_jfrog: "https://dsp-artifacts.fr.world.socgen:443/artifactory"
+artifact_id: "{{ project_name }}"
+artifact_version: "{{ project_version }}"
 
+# JFrog
+dsp_url_jfrog: "https://dsp-artifacts.fr.world.socgen:443/artifactory"
 jfrog_api_token: "{{ jf_access_token }}"
+repo_jfrog: "{{ repo_jfrog_prj }}"
 zip_name_jfrog: "{{ project_name }}-{{ project_version }}.zip"
 file_name_jfrog: "{{ project_name }}-{{ project_version }}"
-jar_name: "{{ jar_name }}"
-deploy_config_file: "{{ deploy_config_file }}"
 
-## Add vault credential
-file_conf: "{{ file_conf }}"
-path_conf: "{{ path_conf }}"
-approle_id: "{{ approle_id }}"
-approle_secret: "{{ approle_secret }}"
-only_jar: "{{ only_jar }}"
+# Telechargements : tentatives et delai maximal par fichier (secondes)
+download_retries: 3
+download_delay: 10
+download_timeout: 300
 
-repo_jfrog: "{{ repo_jfrog_prj }}"
+# Les extra vars jar_name, deploy_config_file, only_jar, file_conf, path_conf, approle_id, approle_secret...
+# ne sont plus redeclarees ici sous la forme x: "{{ x }}" (auto-reference, erreur si la variable manque) :
+# tasks/deploy_scala.yml leur donne une valeur par defaut.
