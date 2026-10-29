@@ -1,0 +1,40 @@
+---
+#path deployment in dev
+path_principal_deploy: "/DATA/applications_01"
+
+#folder path
+path_deploy: "{{ irt_trigram }}/{{ env }}/scala"
+
+#Deploy path
+path_script_deploy: "{{ irt_trigram }}/{{ env }}/{{ path_source }}/bin"
+
+#sh folder path
+path_shell_deploy: "{{ irt_trigram }}/{{ env }}/{{ path_source }}/sh"
+
+#conf folder path
+path_conf_deploy: "{{ irt_trigram }}/{{ env }}/{{ path_source }}/conf"
+
+#extention ZIP
+artifact_extension: jar
+
+# Maven coordinates of the application to deploy
+group_id: "{{ project_group_id }}"
+artifact_id: "{{ project_name }}" #"DLUsageView"
+artifact_version: "{{ project_version }}" #"1.0-SNAPSHOT"
+#URl nexus
+dsp_url_jfrog: "https://dsp-artifacts.fr.world.socgen:443/artifactory"
+
+jfrog_api_token: "{{ jf_access_token }}"
+zip_name_jfrog: "{{ project_name }}-{{ project_version }}.zip"
+file_name_jfrog: "{{ project_name }}-{{ project_version }}"
+jar_name: "{{ jar_name }}"
+deploy_config_file: "{{ deploy_config_file }}"
+
+## Add vault credential
+file_conf: "{{ file_conf }}"
+path_conf: "{{ path_conf }}"
+approle_id: "{{ approle_id }}"
+approle_secret: "{{ approle_secret }}"
+only_jar: "{{ only_jar }}"
+
+repo_jfrog: "{{ repo_jfrog_prj }}"
