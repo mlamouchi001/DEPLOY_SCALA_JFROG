@@ -1,0 +1,10 @@
+---
+#Environment
+env: prd
+
+#keytab information
+#kerberos_keytab: "/DATA/data_01/keytabs_applications/dab-e538cbccc6aa-p_fnia8401.applicatif.keytab"
+#kerberos_principal: "dab-e538cbccc6aa-p_fnia8401@IDM.EU-FR-PARIS.CLOUD.SOCGEN"
+
+#extra_vars nexus_repository
+nexus_repository: "maven-releases"
