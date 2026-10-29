@@ -1,0 +1,213 @@
+---
+- name: "Deploy Scala Project on EDGE"
+  hosts: edges,edge_lucid
+  vars_files:
+    - "group_vars/{{ env }}/{{ env }}.yml"
+    - "group_vars/global.yml"
+  tasks:
+    - name: "check scala/bin directory if it does exist"
+      file:
+        path: "{{path_principal_deploy}}/{{path_script_deploy}}"
+        state: directory
+        
+    - name: "check tmp directory if it does exist"
+      file:
+        path: "{{path_principal_deploy}}/{{path_deploy}}/tmp"
+        state: directory
+         
+    - name: "download the required artifact: ZIP"
+      get_url:
+        url: "{{dsp_url_jfrog}}/{{repo_jfrog}}/{{path_group_id}}/{{project_name}}/{{app_version}}/{{zip_name_jfrog}}"
+        dest: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp/{{ file_name_jfrog }}.zip"
+        force: yes
+        headers:
+          Authorization: "Bearer {{ jfrog_api_token }}"
+      when:
+        - only_jar == "true"
+
+    - name: "download the required artifact: JAR"
+      get_url:
+        url: "{{dsp_url_jfrog}}/{{repo_jfrog}}/{{path_group_id}}/{{project_name}}/{{app_version}}/{{file_name_jfrog}}.jar"
+        dest: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp/{{ jar_name }}.jar"
+        force: yes
+        headers:
+          Authorization: "Bearer {{ jfrog_api_token }}"
+          
+    - name: "Unzip the zip archive downloaded from Nexus"
+      unarchive:
+        src: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp/{{ file_name_jfrog }}.zip"
+        dest: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp/"
+        copy: no
+      when:
+        - only_jar == "true"
+
+    - name: "check scala/bin directory if it does exist"
+      file:
+        path: "{{path_principal_deploy}}/{{path_script_deploy}}"
+        state: directory
+
+    - name: "find jar file in directory"
+      find:
+        paths: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp"
+        file_type: file
+        recurse: yes
+        patterns: "*.jar"
+      register: scripts_files
+    - debug: msg="{{ scripts_files }}"
+
+    - name: "copy scripts shell to scala/bin directory"
+      copy:
+        src: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp/{{ jar_name }}.jar"
+        dest: "{{path_principal_deploy}}/{{path_script_deploy}}/"
+        remote_src: yes
+        mode: '0755'
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+
+    - name: "Put Jar to : /{{ env }}/{{ app_config }}/{{ irt_trigram }}/bin"
+      hdfs_copy:
+        src: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp/{{ jar_name }}.jar"
+        dest: "/{{ env }}/{{ app_config }}/{{ irt_trigram }}/bin"
+        mode: "{{ mode | default(omit) }}"
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+        kerberos_keytab: "{{ keytab_path }}"
+        kerberos_principal: "{{ keytab_principal }}"
+      when: 
+      - deploy_hdfs == "true"
+      run_once: true
+
+    - name: "find scripts shell in directory"
+      find:
+        paths: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp"
+        file_type: file
+        recurse: yes
+        patterns: "*.sh"
+      register: scripts_files
+      when:
+        - only_jar == "true"
+    - debug: msg="{{ scripts_files }}"
+
+    - name: "check scala/sh directory if it does exist"
+      file:
+        path: "{{path_principal_deploy}}/{{path_shell_deploy}}"
+        state: directory
+      when:
+        - only_jar == "true"
+
+    - name: "copy scripts shell to scala/sh directory"
+      copy:
+        src: "{{ file.path }}"
+        dest: "{{path_principal_deploy}}/{{path_shell_deploy}}/"
+        remote_src: yes
+        mode: '0755'
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+      with_items: "{{ scripts_files.files }}"
+      when:
+        - only_jar == "true"
+      loop_control:
+        loop_var: file
+
+    - name: "Put scripts shell to : /{{ env }}/{{ app_config }}/{{ irt_trigram }}/sh "
+      hdfs_copy:
+        src: "{{ file.path }}"
+        dest: "/{{ env }}/{{ app_config }}/{{ irt_trigram }}/sh"
+        mode: "{{ mode | default(omit) }}"
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+        kerberos_keytab: "{{ keytab_path }}"
+        kerberos_principal: "{{ keytab_principal }}"
+      with_items: "{{ scripts_files.files }}"
+      when: 
+      - deploy_hdfs == "true" and only_jar == "true"
+      loop_control:
+        loop_var: file
+      run_once: true
+     
+    - name: "find all conf file in directory"
+      find:
+        paths: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp"
+        file_type: file
+        recurse: yes
+        patterns: "*.conf"
+      register: conf_files
+      when: 
+      - deploy_config_file == "true" and application_conf == "all" and only_jar == "true"
+    - debug: msg="{{ conf_files }}"
+
+    - name: "check scala/conf directory if it does exist"
+      file :
+        path: "{{path_principal_deploy}}/{{path_conf_deploy}}"
+        state: directory
+      when:
+        - only_jar == "true"
+
+    - name: "copy all conf file to scala/conf directory"
+      copy:
+        src: "{{ file.path }}"
+        dest: "{{path_principal_deploy}}/{{path_conf_deploy}}/"
+        remote_src: yes
+      with_items: "{{ conf_files.files }}"
+      loop_control:
+        loop_var: file
+      when: 
+      - deploy_config_file == "true" and application_conf == "all" and only_jar == "true"
+
+    - name: "Put all conf to : /{{ env }}/{{ app_config }}/{{ irt_trigram }}/conf"
+      hdfs_copy:
+        src: "{{ file.path }}"
+        dest: "/{{ env }}/{{ app_config }}/{{ irt_trigram }}/conf"
+        kerberos_keytab: "{{ keytab_path }}"
+        kerberos_principal: "{{ keytab_principal }}"
+      with_items: "{{ scripts_files.files }}"
+      when:
+        - deploy_config_file == "true" and application_conf == "all" and only_jar == "true"
+      loop_control:
+        loop_var: file
+      run_once: true
+
+    - name: "find conf file {{ application_conf }} in directory"
+      find:
+        paths: "{{ path_principal_deploy }}/{{ path_deploy }}/tmp"
+        file_type: file
+        recurse: yes
+        patterns: "{{ application_conf }}"
+      register: conf_files
+      when: 
+      - deploy_config_file == "true" and application_conf != "all" and only_jar == "true"
+    - debug: msg="{{ conf_files }}"
+
+    - name: "check scala/conf directory if it does exist"
+      file :
+        path: "{{path_principal_deploy}}/{{path_conf_deploy}}"
+        state: directory
+      when:
+        - only_jar == "true"
+
+    - name: "copy conf file {{ application_conf }} to scala/conf directory"
+      copy:
+        src: "{{ file.path }}"
+        dest: "{{path_principal_deploy}}/{{path_conf_deploy}}/"
+        remote_src: yes
+      with_items: "{{ conf_files.files }}"
+      loop_control:
+        loop_var: file
+      when: 
+        - deploy_config_file == "true" and application_conf != "all" and only_jar == "true"
+
+    - name: "Put conf file {{ application_conf }} to : /{{ env }}/{{ app_config }}/{{ irt_trigram }}/conf"
+      hdfs_copy:
+        src: "{{ file.path }}"
+        dest: "/{{ env }}/{{ app_config }}/{{ irt_trigram }}/conf"
+        mode: "{{ mode | default(omit) }}"
+        owner: "{{ owner | default(omit) }}"
+        group: "{{ group | default(omit) }}"
+        kerberos_keytab: "{{ keytab_path }}"
+        kerberos_principal: "{{ keytab_principal }}"
+      with_items: "{{ scripts_files.files }}"
+      when: 
+        - deploy_hdfs == "true" and application_conf != "all" and only_jar == "true"
+      loop_control:
+        loop_var: file
+      run_once: true
