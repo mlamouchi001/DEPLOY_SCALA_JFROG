@@ -1,0 +1,8 @@
+---
+
+- src: https://sgithub.fr.world.socgen/DTUTransverse/role_app_hdfs.git
+  name: role_app_hdfs
+  scm: git
+  version: dev_all_to_merge
+
+...
