@@ -1,0 +1,6 @@
+---
+#Environment
+env: int
+
+#extra_vars nexus_repository
+nexus_repository: "maven-snapshots"
