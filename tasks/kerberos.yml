@@ -1,0 +1,55 @@
+---
+# Principal Kerberos des copies HDFS (hdfs_copy -> kinit -kt <keytab_path> <principal>).
+# keytab_path et keytab_principal viennent de l'inventaire / du template AWX. Si le principal fourni n'est pas dans
+# le keytab (ex. nom du fichier keytab suivi du royaume : xxx.applicatif.keytab@REALM), on prend celui du keytab :
+# le deploiement fonctionne sans modifier AWX, et un avertissement l'indique.
+
+- name: "Kerberos : keytab {{ keytab_path | default('non defini') }}"
+  stat:
+    path: "{{ keytab_path }}"
+  register: _kt_stat
+  when: keytab_path is defined and keytab_path | length > 0
+
+- name: "Kerberos : controle du keytab"
+  assert:
+    that:
+      - keytab_path is defined and keytab_path | length > 0
+      - _kt_stat.stat.exists | default(false)
+      - _kt_stat.stat.readable | default(false)
+    fail_msg: >-
+      Keytab absent ou illisible pour le compte de deploiement : {{ keytab_path | default('keytab_path non defini') }}.
+      Les copies HDFS ont besoin de keytab_path et keytab_principal (inventaire ou template AWX).
+    quiet: true
+
+- name: "Kerberos : principaux du keytab"
+  command: klist -k "{{ keytab_path }}"
+  register: _klist
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "Kerberos : choix du principal"
+  set_fact:
+    _kt_principals: "{{ _klist.stdout_lines | default([]) | map('regex_search', '[^\\s]+@[^\\s]+') | select('string') | unique | list }}"
+
+- name: "Kerberos : principal retenu"
+  set_fact:
+    _kerberos_principal: >-
+      {{ keytab_principal
+         if (_kt_principals | length == 0 or (keytab_principal | default('')) in _kt_principals)
+         else _kt_principals[0] }}
+
+- name: "Kerberos : principal corrige"
+  debug:
+    msg: >-
+      ATTENTION : le principal fourni ({{ keytab_principal | default('non defini') }}) n'est pas dans le keytab
+      {{ keytab_path }} ; utilisation de {{ _kerberos_principal }}. Corriger keytab_principal dans AWX a l'occasion.
+  when: (keytab_principal | default('')) != _kerberos_principal
+
+- name: "Kerberos : principal indisponible"
+  assert:
+    that: _kerberos_principal | length > 0
+    fail_msg: >-
+      Aucun principal Kerberos : keytab_principal non defini et klist -k {{ keytab_path }} illisible
+      ({{ _klist.stderr | default('klist absent') }}).
+    quiet: true

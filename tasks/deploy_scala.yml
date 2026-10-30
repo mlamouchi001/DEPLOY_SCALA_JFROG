@@ -89,6 +89,10 @@
     # -----------------------------------------------------------------------------------------------------
     # 4. Jar
     # -----------------------------------------------------------------------------------------------------
+    - name: "Kerberos des copies HDFS"
+      include_tasks: kerberos.yml
+      when: _deploy_hdfs or (_deploy_bundle and _deploy_conf)
+
     - name: "Installation du jar dans {{ _bin_dir }}"
       copy:
         src: "{{ _work.path }}/{{ _jar_name }}.jar"
@@ -106,7 +110,7 @@
         owner: "{{ owner | default(omit) }}"
         group: "{{ group | default(omit) }}"
         kerberos_keytab: "{{ keytab_path }}"
-        kerberos_principal: "{{ keytab_principal }}"
+        kerberos_principal: "{{ _kerberos_principal }}"
       when: _deploy_hdfs
       run_once: true
 
@@ -143,7 +147,7 @@
         owner: "{{ owner | default(omit) }}"
         group: "{{ group | default(omit) }}"
         kerberos_keytab: "{{ keytab_path }}"
-        kerberos_principal: "{{ keytab_principal }}"
+        kerberos_principal: "{{ _kerberos_principal }}"
       loop: "{{ _scripts.files | default([]) }}"
       loop_control:
         label: "{{ item.path | basename }}"
@@ -189,7 +193,7 @@
         owner: "{{ owner | default(omit) }}"
         group: "{{ group | default(omit) }}"
         kerberos_keytab: "{{ keytab_path }}"
-        kerberos_principal: "{{ keytab_principal }}"
+        kerberos_principal: "{{ _kerberos_principal }}"
       loop: "{{ _confs.files | default([]) }}"
       loop_control:
         label: "{{ item.path | basename }}"

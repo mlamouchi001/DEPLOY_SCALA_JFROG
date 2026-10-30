@@ -93,6 +93,10 @@ Le déploiement échoue si le fichier ne contient pas `roleId` et `secretId`, ou
 - `keytab_path` et `keytab_principal`, pour les copies HDFS ;
 - `owner`, `group` et `mode`, facultatives.
 
+**Kerberos** (`tasks/kerberos.yml`). Avant les copies HDFS, le playbook vérifie que le keytab existe et qu'il est lisible, puis lit ses principaux avec `klist -k`.
+- Si `keytab_principal` n'y figure pas, le principal du keytab est utilisé à sa place, et un avertissement est affiché. C'est le cas, par exemple, quand on fournit `xxx.applicatif.keytab@REALM`, c'est-à-dire le nom du fichier au lieu du principal.
+- Le déploiement fonctionne donc sans corriger l'inventaire AWX, mais il vaut mieux le corriger à l'occasion.
+
 Points à connaître :
 - **`only_jar` a un sens inversé.** Dans `deploy.yml`, le bundle zip (scripts et configuration) n'est traité que si `only_jar == "true"`. C'est la valeur par défaut du workflow. Le comportement est conservé pour ne casser aucun projet. Pour l'exprimer clairement, utilisez `deploy_bundle`.
 - **Configuration sur HDFS.** Elle est copiée dès que `deploy_config_file` vaut `true`, comme avant avec `application_conf: all`.
