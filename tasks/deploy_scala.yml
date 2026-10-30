@@ -3,12 +3,14 @@
 #   playbook_bundle_default      : traiter le bundle zip (scripts shell, fichiers de configuration)
 #   playbook_hdfs_default        : copier le jar et les scripts sur HDFS
 #   playbook_vault_legacy_layout : emplacement historique du fichier Vault (deploy_vault.yml)
+# Extra var vault_only=true : seul vault.conf est depose (ni telechargement, ni jar, ni HDFS).
 
 # ---------------------------------------------------------------------------------------------------------
 # 1. Parametres et controles : on s'arrete avant de toucher au serveur si une extra var manque.
 # ---------------------------------------------------------------------------------------------------------
 - name: "Parametres du deploiement"
   set_fact:
+    _vault_only: "{{ (vault_only | default('false')) | bool }}"
     _deploy_bundle: "{{ (deploy_bundle | default(playbook_bundle_default)) | bool }}"
     _deploy_hdfs: "{{ playbook_hdfs_default | bool }}"
     _deploy_conf: "{{ (deploy_config_file | default('false')) | bool }}"
@@ -33,7 +35,7 @@
       - app_version is defined and app_version | length > 0
       - path_group_id is defined and path_group_id | length > 0 and '..' not in path_group_id
       - repo_jfrog_prj is defined and repo_jfrog_prj | length > 0
-      - jf_access_token is defined and jf_access_token | length > 0
+      - _vault_only or (jf_access_token is defined and jf_access_token | length > 0)
       - _jar_name is match('^[A-Za-z0-9._-]+$')
       - (path_source | default('scala', true)) is match('^[A-Za-z0-9._-]+$')
       - _application_conf == 'all' or _application_conf is match('^[A-Za-z0-9._*?-]+$')
@@ -42,6 +44,28 @@
       app_version, path_group_id, repo_jfrog_prj, jf_access_token, jar_name, path_source, application_conf).
       Verifiez les parametres envoyes par le workflow GitHub Actions.
     quiet: true
+
+# ---------------------------------------------------------------------------------------------------------
+# Depot de vault.conf seul (vault_only) : le reste du deploiement n'est pas joue sur cet hote.
+# ---------------------------------------------------------------------------------------------------------
+- name: "Depot de vault.conf seul"
+  when: _vault_only
+  block:
+    - name: "Configuration Vault"
+      include_tasks: vault.yml
+
+    - name: "Controle du depot de vault.conf"
+      assert:
+        that: _vault_dest is defined
+        fail_msg: "vault_only=true mais aucun fichier Vault recu (extra vars vault_conf_b64 ou approle_id / approle_secret)"
+        quiet: true
+
+    - name: "Resume"
+      debug:
+        msg: "vault.conf : {{ _vault_dest }} (droits 600)"
+
+    - name: "Fin du deploiement (vault_only)"
+      meta: end_host
 
 # ---------------------------------------------------------------------------------------------------------
 # 2. Dossiers de l'application et dossier de travail propre a ce deploiement

@@ -86,6 +86,7 @@ Le déploiement échoue si le fichier ne contient pas `roleId` et `secretId`, ou
 
 **Facultatives, nouvelles** :
 - `vault_conf_b64`, `vault_conf_name`, `vault_conf_path` ;
+- `vault_only` : `true` pour déposer seulement le fichier Vault, sans téléchargement, ni jar, ni HDFS, ni jeton JFrog. Les projets dont le dépôt générique ne gère pas Vault l'utilisent : leur CD relance le même job template avec `vault_conf_b64` ;
 - `deploy_bundle` : `true` ou `false`, prioritaire sur `only_jar` ;
 - `download_retries`, `download_delay`, `download_timeout`.
 
